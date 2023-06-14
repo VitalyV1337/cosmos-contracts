@@ -32,6 +32,14 @@ pub enum QueryMsg {
         path: Vec<SwapAmountInRoute>,
         slippage: Decimal,
     },
+    #[returns(PriceImpactTradeResponse)]
+    EstimatePriceImpactTwapMinInputOutput{
+        input_coin: cosmwasm_std::Coin,
+        to_coin_denom: String,
+        pool_id: u64,
+        max_price_impact: Decimal,
+        twap_price: Decimal,
+    }
 }
 
 #[cw_serde]
@@ -61,6 +69,12 @@ pub struct MultiSwapMsg {
     pub amount_in: Coin,
     pub swap_msg: OsmosisSwapMsg,
     pub after_swap_action: AfterSwapAction,
+}
+
+#[cw_serde]
+pub struct PriceImpactTradeResponse {
+    pub amount_in: Coin,
+    pub amount_out: Coin,
 }
 
 #[EnumRepr(type = "u64")]

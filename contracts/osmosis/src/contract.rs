@@ -91,5 +91,17 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
             )
             .unwrap(),
         ),
+        QueryMsg::EstimatePriceImpactTwapMinInputOutput {
+            input_coin,
+            to_coin_denom,
+            pool_id,
+            max_price_impact,
+            twap_price,
+        } => to_binary(
+            &commands::estimate_price_impact_twap_min_input_output(
+                deps, &env, input_coin, to_coin_denom, pool_id, max_price_impact, twap_price,
+            )
+            .unwrap(),
+        ),
     }
 }

@@ -1,18 +1,24 @@
+use std::str::FromStr;
+
+use cw_multi_test::Contract;
 use ::prost::Message;
 
 use cosmwasm_std::{
-    to_binary, BankMsg, DepsMut, Env, MessageInfo, Reply, Response, SubMsg, SubMsgResponse,
-    SubMsgResult, WasmMsg,
+    to_binary, BankMsg, Deps, DepsMut, Env, MessageInfo, Reply, Response, SubMsg, SubMsgResponse,
+    SubMsgResult, WasmMsg, Coin, Decimal, Uint128,
 };
 use cw_utils::one_coin;
 use osmosis_router::{
     router::{build_swap_msg, get_swap_amount_out_response},
     OsmosisSwapMsg,
 };
+use osmosis_std::types::osmosis::poolmanager::v1beta1::PoolmanagerQuerier;
+use error::OsmosisRouterError;
 
 use crate::{
     msg::{
         AfterSwapAction, ExecuteMsg, MsgReplyId, MsgTransfer, MsgTransferResponse, MultiSwapMsg,
+        PriceImpactTradeResponse,
     },
     state::{
         load_ibc_transfer_reply_state, load_multi_swap_state, load_swap_reply_state,
@@ -200,4 +206,58 @@ pub fn handle_multiswap_reply(deps: DepsMut, env: &Env) -> Result<Response, Cont
         swap_msg,
         MsgReplyId::MultiSwap.repr(),
     )))
+}
+
+pub fn estimate_price_impact_twap_min_input_output(
+    deps: Deps,
+    env: &Env,
+    input_coin: Coin,
+    to_coin_denom: String,
+    pool_id: u64,
+    max_price_impact: Decimal,
+    twap_price: Decimal,
+) -> Result <PriceImpactTradeResponse, ContractError> {
+
+    // // Define your querier
+    let poolmanager_querier = PoolmanagerQuerier::new(&deps.querier);
+
+    // Get the pool based on ID
+    let pool = poolmanager_querier.pool(pool_id)?;
+
+    let spot_price_response = poolmanager_querier.spot_price(pool_id, input_coin.denom.clone(), to_coin_denom.clone())?;
+    let spot_price_str = spot_price_response.spot_price; // Assuming spot_price is a string in the response
+    let spot_price = Decimal::from_str(&spot_price_str).map_err(|_| ContractError::InvalidSpotPrice)?; 
+
+    // Calculate adjusted maxPriceImpact based on twapPrice and spotPrice
+    let price_deviation = (spot_price - twap_price) / twap_price;
+    max_price_impact = max_price_impact - price_deviation;
+
+    loop {
+        // Calculate token out
+        let estimate_response = poolmanager_querier.estimate_single_pool_swap_exact_amount_in(pool_id, input_coin.denom.clone(), to_coin_denom.clone())?;
+        let token_out = estimate_response.token_out_amount; // Assuming token_out is a field in the response
+
+        // If token_out is zero, return an error
+        if token_out.amount.is_zero() {
+            return Err(ContractError::ZeroTokenOut);
+        }
+
+        let curr_trade_price = token_out.amount / input_coin.amount;
+        let price_deviation = (spot_price - curr_trade_price) / curr_trade_price;
+
+        if price_deviation <= max_price_impact {
+            return Ok(PriceImpactTradeResponse{
+                amount_in: input_coin.clone(),
+                amount_out: token_out,
+            });
+        } else {
+            // Half the input amount and try again
+            input_coin.amount = input_coin.amount / Uint128::from(2u64);
+        }
+    }
+
+    // Ok(PriceImpactTradeResponse{
+    //     amount_in: input_coin.clone(),
+    //     amount_out: input_coin,
+    // })
 }
